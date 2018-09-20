@@ -48,9 +48,9 @@ Or use it as a maven dependency:
 
 ```xml
 <dependency>
-    <groupId>redis.clients</groupId>
+    <groupId>com.redislabs</groupId>
     <artifactId>jedis</artifactId>
-    <version>2.9.0</version>
+    <version>3.0.0-m1</version>
     <type>jar</type>
     <scope>compile</scope>
 </dependency>

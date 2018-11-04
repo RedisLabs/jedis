@@ -96,7 +96,7 @@ public class JedisClusterInfoCache {
           }
         }
 
-        for (JedisPool jp : getShuffledNodesPool()) {
+        for (ConnectionPool<Jedis> jp : getShuffledNodesPool()) {
           Jedis j = null;
           try {
             j = jp.getResource();
@@ -194,7 +194,7 @@ public class JedisClusterInfoCache {
     }
   }
 
-  public JedisPool getSlotPool(int slot) {
+  public ConnectionPool<Jedis> getSlotPool(int slot) {
     r.lock();
     try {
       return slots.get(slot);
@@ -212,10 +212,10 @@ public class JedisClusterInfoCache {
     }
   }
 
-  public List<JedisPool> getShuffledNodesPool() {
+  public List<ConnectionPool<Jedis>> getShuffledNodesPool() {
     r.lock();
     try {
-      List<JedisPool> pools = new ArrayList<JedisPool>(nodes.values());
+      List<ConnectionPool<Jedis>> pools = new ArrayList<ConnectionPool<Jedis>>(nodes.values());
       Collections.shuffle(pools);
       return pools;
     } finally {

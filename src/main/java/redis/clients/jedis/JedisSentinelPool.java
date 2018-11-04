@@ -1,5 +1,6 @@
 package redis.clients.jedis;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -12,10 +13,16 @@ import org.slf4j.LoggerFactory;
 
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
+import redis.clients.jedis.util.ApacheObjectPoolConfig;
+import redis.clients.jedis.util.Pool;
+import redis.clients.jedis.util.RedisObjectPool;
+import redis.clients.jedis.util.RedisObjectPoolConfig;
 
-public class JedisSentinelPool extends JedisPoolAbstract {
+public class JedisSentinelPool implements ConnectionPool<Jedis> {
 
-  protected GenericObjectPoolConfig poolConfig;
+  private RedisObjectPool<Jedis> jedisPool;
+
+  protected RedisObjectPoolConfig poolConfig;
 
   protected int connectionTimeout = Protocol.DEFAULT_TIMEOUT;
   protected int soTimeout = Protocol.DEFAULT_TIMEOUT;
@@ -84,7 +91,7 @@ public class JedisSentinelPool extends JedisPoolAbstract {
   public JedisSentinelPool(String masterName, Set<String> sentinels,
       final GenericObjectPoolConfig poolConfig, final int connectionTimeout, final int soTimeout,
       final String password, final int database, final String clientName) {
-    this.poolConfig = poolConfig;
+    this.poolConfig = new ApacheObjectPoolConfig(poolConfig);
     this.connectionTimeout = connectionTimeout;
     this.soTimeout = soTimeout;
     this.password = password;
@@ -100,8 +107,22 @@ public class JedisSentinelPool extends JedisPoolAbstract {
     for (MasterListener m : masterListeners) {
       m.shutdown();
     }
+    jedisPool.destroy();
+  }
 
-    super.destroy();
+  @Override
+  public int getNumActive() {
+    return jedisPool.getNumActive();
+  }
+
+  @Override
+  public int getNumIdle() {
+    return jedisPool.getNumIdle();
+  }
+
+  @Override
+  public void addObjects(int count) {
+    jedisPool.addObjects(count);
   }
 
   public HostAndPort getCurrentHostMaster() {
@@ -114,14 +135,14 @@ public class JedisSentinelPool extends JedisPoolAbstract {
       if (factory == null) {
         factory = new JedisFactory(master.getHost(), master.getPort(), connectionTimeout,
             soTimeout, password, database, clientName);
-        initPool(poolConfig, factory);
+        jedisPool.init(poolConfig, factory);
       } else {
         factory.setHostAndPort(currentHostMaster);
         // although we clear the pool, we still have to check the
         // returned object
         // in getResource, this call only clears idle instances, not
         // borrowed instances
-        internalPool.clear();
+        jedisPool.clear();
       }
 
       log.info("Created JedisPool to master at " + master);
@@ -204,10 +225,15 @@ public class JedisSentinelPool extends JedisPoolAbstract {
   }
 
   @Override
+  public boolean isClosed() {
+    return false;
+  }
+
+  @Override
   public Jedis getResource() {
     while (true) {
-      Jedis jedis = super.getResource();
-      jedis.setDataSource(this);
+      Jedis jedis = jedisPool.getResource();
+      jedis.setDataSource(jedisPool);
 
       // get a reference because it can change concurrently
       final HostAndPort master = currentHostMaster;
@@ -224,18 +250,21 @@ public class JedisSentinelPool extends JedisPoolAbstract {
   }
 
   @Override
-  protected void returnBrokenResource(final Jedis resource) {
+  public void returnBrokenResource(final Jedis resource) {
+      jedisPool.returnBrokenResource(resource);
+  }
+
+  @Override
+  public void returnResource(final Jedis resource) {
     if (resource != null) {
-      returnBrokenResourceObject(resource);
+      resource.resetState();
+      jedisPool.returnResource(resource);
     }
   }
 
   @Override
-  protected void returnResource(final Jedis resource) {
-    if (resource != null) {
-      resource.resetState();
-      returnResourceObject(resource);
-    }
+  public void close() throws IOException {
+
   }
 
   protected class MasterListener extends Thread {

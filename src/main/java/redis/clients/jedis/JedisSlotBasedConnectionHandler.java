@@ -35,9 +35,9 @@ public class JedisSlotBasedConnectionHandler extends JedisClusterConnectionHandl
     // ping-pong)
     // or exception if all connections are invalid
 
-    List<JedisPool> pools = cache.getShuffledNodesPool();
+    List<ConnectionPool<Jedis>> pools = cache.getShuffledNodesPool();
 
-    for (JedisPool pool : pools) {
+    for (ConnectionPool<Jedis> pool : pools) {
       Jedis jedis = null;
       try {
         jedis = pool.getResource();
@@ -63,7 +63,7 @@ public class JedisSlotBasedConnectionHandler extends JedisClusterConnectionHandl
 
   @Override
   public Jedis getConnectionFromSlot(int slot) {
-    JedisPool connectionPool = cache.getSlotPool(slot);
+    ConnectionPool<Jedis> connectionPool = cache.getSlotPool(slot);
     if (connectionPool != null) {
       // It can't guaranteed to get valid connection because of node
       // assignment

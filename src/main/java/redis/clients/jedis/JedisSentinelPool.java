@@ -40,6 +40,10 @@ public class JedisSentinelPool implements ConnectionPool<Jedis> {
   private volatile JedisFactory factory;
   private volatile HostAndPort currentHostMaster;
 
+  private JedisSentinelPool(RedisObjectPool<Jedis> jedisPool){
+      this.jedisPool = jedisPool;
+  }
+
   public JedisSentinelPool(String masterName, Set<String> sentinels,
       final GenericObjectPoolConfig poolConfig) {
     this(masterName, sentinels, poolConfig, Protocol.DEFAULT_TIMEOUT, null,
@@ -100,6 +104,10 @@ public class JedisSentinelPool implements ConnectionPool<Jedis> {
 
     HostAndPort master = initSentinels(sentinels, masterName);
     initPool(master);
+  }
+
+  private JedisSentinelPool(Builder builder) {
+    jedisPool = builder.jedisPool;
   }
 
   @Override
@@ -372,6 +380,59 @@ public class JedisSentinelPool implements ConnectionPool<Jedis> {
       } catch (Exception e) {
         log.error("Caught exception while shutting down: ", e);
       }
+    }
+  }
+
+  public Builder toBuilder() {
+    return new Builder(this.jedisPool);
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  /**
+   * {@code JedisSentinelPool} builder static inner class.
+   */
+  public static final class Builder {
+    private RedisObjectPool<Jedis> jedisPool;
+
+    private Builder( RedisObjectPool<Jedis> jedisPool) {
+      this.jedisPool = jedisPool;
+    }
+
+    private Builder() {
+    }
+
+    /**
+     * Sets the {@code jedisPool} and returns a reference to this Builder so that the methods can be chained together.
+     *
+     * @param val the {@code jedisPool} to set
+     * @return a reference to this Builder
+     */
+    public Builder withRedisObjectPool(RedisObjectPool<Jedis> val) {
+      jedisPool = val;
+      return this;
+    }
+
+    /**
+     * Returns a {@code JedisSentinelPool} built from the parameters previously set.
+     *
+     * @return a {@code JedisSentinelPool} built with parameters of this {@code JedisSentinelPool.Builder}
+     */
+    public JedisSentinelPool build() {
+
+      String missing = "";
+      if (this.jedisPool == null) {
+        missing += " JedisPool must be set for the SentinelPool to work!";
+      } else if (this.jedisPool.isClosed()) {
+        missing += " JedisPool is already closed please ensure that this JedisPool has not been closed!";
+
+      }
+      if (!missing.isEmpty()) {
+        throw new IllegalStateException("Missing required fields or state:" + missing);
+      }
+      return new JedisSentinelPool(this);
     }
   }
 }

@@ -1,5 +1,6 @@
 package redis.clients.jedis;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -12,10 +13,16 @@ import org.slf4j.LoggerFactory;
 
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
+import redis.clients.jedis.util.ApacheObjectPoolConfig;
+import redis.clients.jedis.util.Pool;
+import redis.clients.jedis.util.RedisObjectPool;
+import redis.clients.jedis.util.RedisObjectPoolConfig;
 
-public class JedisSentinelPool extends JedisPoolAbstract {
+public class JedisSentinelPool implements ConnectionPool<Jedis> {
 
-  protected GenericObjectPoolConfig poolConfig;
+  private RedisObjectPool<Jedis> jedisPool;
+
+  protected RedisObjectPoolConfig poolConfig;
 
   protected int connectionTimeout = Protocol.DEFAULT_TIMEOUT;
   protected int soTimeout = Protocol.DEFAULT_TIMEOUT;
@@ -32,6 +39,10 @@ public class JedisSentinelPool extends JedisPoolAbstract {
 
   private volatile JedisFactory factory;
   private volatile HostAndPort currentHostMaster;
+
+  private JedisSentinelPool(RedisObjectPool<Jedis> jedisPool){
+      this.jedisPool = jedisPool;
+  }
 
   public JedisSentinelPool(String masterName, Set<String> sentinels,
       final GenericObjectPoolConfig poolConfig) {
@@ -84,7 +95,7 @@ public class JedisSentinelPool extends JedisPoolAbstract {
   public JedisSentinelPool(String masterName, Set<String> sentinels,
       final GenericObjectPoolConfig poolConfig, final int connectionTimeout, final int soTimeout,
       final String password, final int database, final String clientName) {
-    this.poolConfig = poolConfig;
+    this.poolConfig = new ApacheObjectPoolConfig(poolConfig);
     this.connectionTimeout = connectionTimeout;
     this.soTimeout = soTimeout;
     this.password = password;
@@ -95,13 +106,31 @@ public class JedisSentinelPool extends JedisPoolAbstract {
     initPool(master);
   }
 
+  private JedisSentinelPool(Builder builder) {
+    jedisPool = builder.jedisPool;
+  }
+
   @Override
   public void destroy() {
     for (MasterListener m : masterListeners) {
       m.shutdown();
     }
+    jedisPool.destroy();
+  }
 
-    super.destroy();
+  @Override
+  public int getNumActive() {
+    return jedisPool.getNumActive();
+  }
+
+  @Override
+  public int getNumIdle() {
+    return jedisPool.getNumIdle();
+  }
+
+  @Override
+  public void addObjects(int count) {
+    jedisPool.addObjects(count);
   }
 
   public HostAndPort getCurrentHostMaster() {
@@ -114,14 +143,14 @@ public class JedisSentinelPool extends JedisPoolAbstract {
       if (factory == null) {
         factory = new JedisFactory(master.getHost(), master.getPort(), connectionTimeout,
             soTimeout, password, database, clientName);
-        initPool(poolConfig, factory);
+        jedisPool.init(poolConfig, factory);
       } else {
         factory.setHostAndPort(currentHostMaster);
         // although we clear the pool, we still have to check the
         // returned object
         // in getResource, this call only clears idle instances, not
         // borrowed instances
-        internalPool.clear();
+        jedisPool.clear();
       }
 
       log.info("Created JedisPool to master at " + master);
@@ -204,10 +233,15 @@ public class JedisSentinelPool extends JedisPoolAbstract {
   }
 
   @Override
+  public boolean isClosed() {
+    return false;
+  }
+
+  @Override
   public Jedis getResource() {
     while (true) {
-      Jedis jedis = super.getResource();
-      jedis.setDataSource(this);
+      Jedis jedis = jedisPool.getResource();
+      jedis.setDataSource(jedisPool);
 
       // get a reference because it can change concurrently
       final HostAndPort master = currentHostMaster;
@@ -224,18 +258,21 @@ public class JedisSentinelPool extends JedisPoolAbstract {
   }
 
   @Override
-  protected void returnBrokenResource(final Jedis resource) {
+  public void returnBrokenResource(final Jedis resource) {
+      jedisPool.returnBrokenResource(resource);
+  }
+
+  @Override
+  public void returnResource(final Jedis resource) {
     if (resource != null) {
-      returnBrokenResourceObject(resource);
+      resource.resetState();
+      jedisPool.returnResource(resource);
     }
   }
 
   @Override
-  protected void returnResource(final Jedis resource) {
-    if (resource != null) {
-      resource.resetState();
-      returnResourceObject(resource);
-    }
+  public void close() throws IOException {
+
   }
 
   protected class MasterListener extends Thread {
@@ -343,6 +380,59 @@ public class JedisSentinelPool extends JedisPoolAbstract {
       } catch (Exception e) {
         log.error("Caught exception while shutting down: ", e);
       }
+    }
+  }
+
+  public Builder toBuilder() {
+    return new Builder(this.jedisPool);
+  }
+
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  /**
+   * {@code JedisSentinelPool} builder static inner class.
+   */
+  public static final class Builder {
+    private RedisObjectPool<Jedis> jedisPool;
+
+    private Builder( RedisObjectPool<Jedis> jedisPool) {
+      this.jedisPool = jedisPool;
+    }
+
+    private Builder() {
+    }
+
+    /**
+     * Sets the {@code jedisPool} and returns a reference to this Builder so that the methods can be chained together.
+     *
+     * @param val the {@code jedisPool} to set
+     * @return a reference to this Builder
+     */
+    public Builder withRedisObjectPool(RedisObjectPool<Jedis> val) {
+      jedisPool = val;
+      return this;
+    }
+
+    /**
+     * Returns a {@code JedisSentinelPool} built from the parameters previously set.
+     *
+     * @return a {@code JedisSentinelPool} built with parameters of this {@code JedisSentinelPool.Builder}
+     */
+    public JedisSentinelPool build() {
+
+      String missing = "";
+      if (this.jedisPool == null) {
+        missing += " JedisPool must be set for the SentinelPool to work!";
+      } else if (this.jedisPool.isClosed()) {
+        missing += " JedisPool is already closed please ensure that this JedisPool has not been closed!";
+
+      }
+      if (!missing.isEmpty()) {
+        throw new IllegalStateException("Missing required fields or state:" + missing);
+      }
+      return new JedisSentinelPool(this);
     }
   }
 }

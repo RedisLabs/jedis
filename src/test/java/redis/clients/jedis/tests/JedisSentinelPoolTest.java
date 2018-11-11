@@ -1,6 +1,7 @@
 package redis.clients.jedis.tests;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.HashSet;
@@ -12,11 +13,15 @@ import org.junit.Test;
 
 import redis.clients.jedis.HostAndPort;
 import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisSentinelPool;
 import redis.clients.jedis.Transaction;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.tests.utils.JedisSentinelTestUtil;
+import redis.clients.jedis.util.RedisObjectPool;
+
+import static org.mockito.Mockito.*;
 
 public class JedisSentinelPoolTest {
   private static final String MASTER_NAME = "mymaster";
@@ -161,6 +166,37 @@ public class JedisSentinelPoolTest {
 
     assertTrue(pool.isClosed());
   }
+
+  @Test
+  public void testBuilderNullJedisPool() throws Exception {
+    try {
+      JedisSentinelPool.builder().build();
+      assertTrue("The Builder should not reach this point",false);
+    } catch (IllegalStateException ie) {
+      assertNotNull("Their should be an error object due to not setting the RedisPool!",ie);
+    }
+  }
+
+  @Test
+  public void testBuilderAlreadyClosedJedisPool() throws Exception {
+    try {
+      RedisObjectPool<Jedis> mock = mock(RedisObjectPool.class);
+      when(mock.isClosed()).thenReturn(true);
+      JedisSentinelPool.builder().withRedisObjectPool(mock).build();
+      assertTrue("The Builder should not reach this point",false);
+    } catch (IllegalStateException ie) {
+      assertNotNull("Their should be an error object due to the RedisPool already being closed!",ie);
+    }
+  }
+
+  @Test
+  public void testBuilderValid() throws Exception {
+      RedisObjectPool<Jedis> mock = mock(RedisObjectPool.class);
+      when(mock.isClosed()).thenReturn(false);
+      JedisSentinelPool pool = JedisSentinelPool.builder().withRedisObjectPool(mock).build();
+      assertNotNull("Builder did not produce a valid Pool",pool);
+  }
+
 
   private void forceFailover(JedisSentinelPool pool) throws InterruptedException {
     HostAndPort oldMaster = pool.getCurrentHostMaster();

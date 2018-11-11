@@ -14,11 +14,12 @@ import org.apache.commons.pool2.impl.DefaultPooledObject;
 import redis.clients.jedis.exceptions.InvalidURIException;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.util.JedisURIHelper;
+import redis.clients.jedis.util.RedisObjectFactory;
 
 /**
  * PoolableObjectFactory custom impl.
  */
-class JedisFactory implements PooledObjectFactory<Jedis> {
+class JedisFactory implements PooledObjectFactory<Jedis>, RedisObjectFactory {
   private final AtomicReference<HostAndPort> hostAndPort = new AtomicReference<HostAndPort>();
   private final int connectionTimeout;
   private final int soTimeout;

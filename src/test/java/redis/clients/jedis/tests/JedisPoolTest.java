@@ -1,9 +1,12 @@
 package redis.clients.jedis.tests;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -15,14 +18,11 @@ import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import org.junit.Test;
 
-import redis.clients.jedis.HostAndPort;
-import redis.clients.jedis.Jedis;
-import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.JedisPoolConfig;
-import redis.clients.jedis.Transaction;
+import redis.clients.jedis.*;
 import redis.clients.jedis.exceptions.InvalidURIException;
 import redis.clients.jedis.exceptions.JedisException;
 import redis.clients.jedis.exceptions.JedisExhaustedPoolException;
+import redis.clients.jedis.util.RedisObjectPool;
 
 public class JedisPoolTest {
   private static HostAndPort hnp = HostAndPortUtil.getRedisServers().get(0);
@@ -254,8 +254,7 @@ public class JedisPoolTest {
 
     GenericObjectPoolConfig config = new GenericObjectPoolConfig();
     config.setMaxTotal(1);
-    JedisPool pool = new JedisPool(config, hnp.getHost(), hnp.getPort(), 2000, "foobared");
-    pool.initPool(config, new CrashingJedisPooledObjectFactory());
+    ConnectionPool<Jedis> pool = new JedisPool(config, new CrashingJedisPooledObjectFactory());
     Jedis crashingJedis = pool.getResource();
 
     try {
@@ -404,5 +403,52 @@ public class JedisPoolTest {
   private int getClientCount(final String clientList) {
     return clientList.split("\n").length;
   }
+
+
+  @Test
+  public void testBuilderNullJedisPool() throws Exception {
+    try {
+      JedisPool.builder().build();
+      assertTrue("The Builder should not reach this point",false);
+    } catch (IllegalStateException ie) {
+      assertNotNull("Their should be an error object due to not setting the RedisPool!",ie);
+    }
+  }
+
+  @Test
+  public void testBuilderAlreadyClosedJedisPool() throws Exception {
+    try {
+      RedisObjectPool<Jedis> mock = mock(RedisObjectPool.class);
+      when(mock.isClosed()).thenReturn(true);
+      JedisPool.builder().withRedisObjectPool(mock).build();
+      assertTrue("The Builder should not reach this point",false);
+    } catch (IllegalStateException ie) {
+      assertNotNull("Their should be an error object due to the RedisPool already being closed!",ie);
+    }
+  }
+
+  @Test
+  public void testBuilderValid() throws Exception {
+    RedisObjectPool<Jedis> mock = mock(RedisObjectPool.class);
+    when(mock.isClosed()).thenReturn(false);
+    JedisPool pool = JedisPool.builder().withRedisObjectPool(mock).build();
+    assertNotNull("Builder did not produce a valid Pool",pool);
+  }
+
+  @Test
+  public void checkJedisConnections() {
+    JedisPool pool = new JedisPool(new JedisPoolConfig(), hnp.getHost(), hnp.getPort(), 2000);
+    JedisPool poolFromBuilder = pool.toBuilder().build();
+    Jedis jedis = poolFromBuilder.getResource();
+    jedis.auth("foobared");
+    jedis.set("foo", "bar");
+    assertEquals("bar", jedis.get("foo"));
+    jedis.close();
+    poolFromBuilder.destroy();
+    pool.destroy();
+    assertTrue(pool.isClosed());
+    assertTrue(poolFromBuilder.isClosed());
+  }
+
 
 }

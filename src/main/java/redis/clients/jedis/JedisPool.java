@@ -18,6 +18,10 @@ public class JedisPool implements ConnectionPool<Jedis> {
         this(Protocol.DEFAULT_HOST, Protocol.DEFAULT_PORT);
     }
 
+    private JedisPool(RedisObjectPool<Jedis> jedisPool){
+        this.jedisPool = jedisPool;
+    }
+
     public JedisPool(GenericObjectPoolConfig config, PooledObjectFactory factory) {
         jedisPool = new Pool<>(config,factory);
     }
@@ -294,6 +298,10 @@ public class JedisPool implements ConnectionPool<Jedis> {
                 sslParameters, hostnameVerifier));
     }
 
+    private JedisPool(JedisPool.Builder builder) {
+        jedisPool = builder.jedisPool;
+    }
+
     @Override
     public boolean isClosed() {
         return jedisPool.isClosed();
@@ -346,5 +354,59 @@ public class JedisPool implements ConnectionPool<Jedis> {
     @Override
     public void close() throws IOException {
         jedisPool.close();
+    }
+
+
+    public JedisPool.Builder toBuilder() {
+        return new JedisPool.Builder(this.jedisPool);
+    }
+
+    public static JedisPool.Builder builder() {
+        return new JedisPool.Builder();
+    }
+
+    /**
+     * {@code JedisSentinelPool} builder static inner class.
+     */
+    public static final class Builder {
+        private RedisObjectPool<Jedis> jedisPool;
+
+        private Builder( RedisObjectPool<Jedis> jedisPool) {
+            this.jedisPool = jedisPool;
+        }
+
+        private Builder() {
+        }
+
+        /**
+         * Sets the {@code jedisPool} and returns a reference to this Builder so that the methods can be chained together.
+         *
+         * @param val the {@code jedisPool} to set
+         * @return a reference to this Builder
+         */
+        public JedisPool.Builder withRedisObjectPool(RedisObjectPool<Jedis> val) {
+            jedisPool = val;
+            return this;
+        }
+
+        /**
+         * Returns a {@code JedisSentinelPool} built from the parameters previously set.
+         *
+         * @return a {@code JedisSentinelPool} built with parameters of this {@code JedisSentinelPool.Builder}
+         */
+        public JedisPool build() {
+
+            String missing = "";
+            if (this.jedisPool == null) {
+                missing += " JedisPool must be set for the JedisPool to work!";
+            } else if (this.jedisPool.isClosed()) {
+                missing += " JedisPool is already closed please ensure that this JedisPool has not been closed!";
+
+            }
+            if (!missing.isEmpty()) {
+                throw new IllegalStateException("Missing required fields or state:" + missing);
+            }
+            return new JedisPool(this);
+        }
     }
 }
